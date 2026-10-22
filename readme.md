@@ -144,6 +144,23 @@ Or using the `/api/languages` route:
 
 ---
 
+## 🧯 Error Cards
+
+Badges are embedded with `<img>` tags, so a JSON error would just show up as a broken image. When a badge request fails, the API returns a small SVG card instead, styled with the same `theme`, color parameters and `locale` as the badge:
+
+| Situation | Card |
+| :--- | :--- |
+| Unknown username | `User not found` |
+| GitHub rate limit reached | `GitHub rate limit reached` (with the wait time, when GitHub provides it) |
+| Anything else (token or GitHub problems) | `Could not load GitHub data` |
+
+- **HTTP status is `200`** for these cards on purpose. GitHub serves README images through its Camo proxy, which replies `404` for any other upstream status, so an error status would still show a broken image.
+- **Short cache lifetime** (1 to 15 minutes, no `stale-while-revalidate`), so the card goes away soon after the problem is fixed.
+- Error details are never rendered on the card. For token or GitHub failures, check the server logs.
+- Requests that are not badge requests (`/health`, unknown routes, missing `username`) keep the standard JSON error responses.
+
+---
+
 ## 🎨 Available Themes
 
 Git Badge Stats comes with over 70 built-in themes out of the box, including:

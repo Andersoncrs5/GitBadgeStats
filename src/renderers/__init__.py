@@ -11,6 +11,7 @@ from src.renderers.languages_card import (
     generate_languages_svg,
 )
 
+from src.renderers.error_card import ErrorCardRenderer, generate_error_svg
 __all__ = [
     "StatsCardRenderer",
     "generate_svg",
@@ -19,4 +20,6 @@ __all__ = [
     "render_flame_svg",
     "LanguagesCardRenderer",
     "generate_languages_svg",
+    "ErrorCardRenderer",
+    "generate_error_svg",
 ]

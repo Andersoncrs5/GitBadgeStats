@@ -5,9 +5,11 @@ the streak badge SVG with proper geometric spacing, crisp fonts, and theme styli
 """
 
 from typing import Optional
+
 from src.common.themes import themes
 from src.common.icons import icons, DUO_FLAME_OUTER_PATH, DUO_FLAME_INNER_PATH
-from src.common.utils import format_color, parse_background, escape_text
+from src.common.utils import escape_text, format_color, parse_background
+from src.common.locales import get_translations
 
 
 class StreakCardRenderer:
@@ -31,6 +33,7 @@ class StreakCardRenderer:
     ):
         self.stats = stats
         self.locale = locale
+        self.translations = get_translations(locale)
         self.hide_days = hide_days
 
         # Theme resolution
@@ -47,7 +50,7 @@ class StreakCardRenderer:
         self.border_color = format_color(raw_border) if raw_border else self.text_color
 
         # Stats extraction
-        self.name = escape_text(stats.get("name", "User"))
+        self.name = stats.get("name", "User")
         self.current_streak = stats.get("current_streak", 0)
         self.longest_streak = stats.get("longest_streak", 0)
         self.total_commits = stats.get("total_commits", 0)
@@ -124,13 +127,13 @@ class StreakCardRenderer:
             pill_bg = "#FF9600"
             pill_border = "#FF9600"
             pill_text_color = "#FF9600" if self.dark_mode else "#D97706"
-            pill_text = active_pill
+            pill_text = escape_text(active_pill)
             pill_fill_opacity = "0.14"
         else:
             pill_bg = "#64748B"
             pill_border = "#94A3B8"
             pill_text_color = "#94A3B8" if self.dark_mode else "#475569"
-            pill_text = inactive_pill
+            pill_text = escape_text(inactive_pill)
             pill_fill_opacity = "0.12"
 
         return f"""
@@ -187,22 +190,20 @@ class StreakCardRenderer:
 
     def render(self) -> str:
         """Render complete SVG card."""
-        if self.locale == "pt":
-            card_title = f"Ofensiva de {self.name}"
-            streak_label = "DIAS DE OFENSIVA"
-            longest_label = "Maior Ofensiva"
-            commits_label = "Total Commits"
-            days_unit = "dias"
-            active_pill = "🔥 OFENSIVA ATIVA"
-            inactive_pill = "❄️ CHAMA APAGADA"
-        else:
-            card_title = f"{self.name}'s GitHub Streak"
-            streak_label = "DAY STREAK"
-            longest_label = "Longest Streak"
-            commits_label = "Total Commits"
-            days_unit = "days"
-            active_pill = "🔥 STREAK ACTIVE"
-            inactive_pill = "❄️ FLAME UNLIT"
+
+        translations = self.translations
+
+        # Escape translated strings before inserting them into the SVG XML.
+        # Escape the complete title after formatting so usernames are not double-escaped.
+        card_title = escape_text(
+            translations["card_title"].format(name=self.name)
+        )
+        streak_label = escape_text(translations["streak_label"])
+        longest_label = escape_text(translations["longest_label"])
+        commits_label = escape_text(translations["commits_label"])
+        days_unit = escape_text(translations["days_unit"])
+        active_pill = translations["active_pill"]
+        inactive_pill = translations["inactive_pill"]
 
         card_width = self.CARD_WIDTH
         card_height = self.COMPACT_HEIGHT if self.hide_days else self.NORMAL_HEIGHT

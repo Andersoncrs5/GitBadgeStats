@@ -1,7 +1,7 @@
 import html
 import math
-from typing import Tuple
-
+import re
+from typing import Optional, Tuple
 
 def format_color(color_val: str, default: str = "333333") -> str:
     """Format color value, ensuring a '#' prefix when needed."""
@@ -70,3 +70,41 @@ def escape_text(text: str) -> str:
     if text is None:
         return ""
     return html.escape(str(text), quote=True)
+
+
+_HEX_COLOR_RE = re.compile(r"#?([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})")
+_ANGLE_RE = re.compile(r"-?\d{1,3}(\.\d+)?")
+
+
+def sanitize_color(value: Optional[str]) -> Optional[str]:
+    """Validate a user-supplied hex color, returning it without '#', or None if invalid.
+
+    Colors from query strings end up inside SVG attributes and <style> blocks, so anything
+    that is not a plain 3/4/6/8-digit hex value is rejected instead of being interpolated.
+    """
+    if not value:
+        return None
+    match = _HEX_COLOR_RE.fullmatch(str(value).strip())
+    return match.group(1) if match else None
+
+
+def sanitize_background(value: Optional[str]) -> Optional[str]:
+    """Validate a user-supplied background: a hex color or 'angle,color,color,...' gradient.
+
+    Returns a normalized string accepted by parse_background(), or None if any part is invalid.
+    """
+    if not value:
+        return None
+
+    parts = [part.strip() for part in str(value).split(",")]
+    angle = None
+    if len(parts) > 1 and _ANGLE_RE.fullmatch(parts[0]):
+        angle, parts = parts[0], parts[1:]
+
+    colors = [sanitize_color(part) for part in parts]
+    if not colors or any(color is None for color in colors):
+        return None
+
+    if angle is None and len(colors) == 1:
+        return colors[0]
+    return ",".join(([angle] if angle is not None else []) + colors)
