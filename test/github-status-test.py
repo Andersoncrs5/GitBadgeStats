@@ -1,10 +1,11 @@
 import os
 from unittest.mock import patch
+
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-# Ensure token is present for test environment
+# Ensure token is present for test environment.
 if not os.getenv("GITHUB_TOKEN"):
     os.environ["GITHUB_TOKEN"] = "test-token-value"
 
@@ -13,7 +14,7 @@ from src.services.cache import cache
 
 client = TestClient(app)
 
-# Mocks for GitHub GraphQL API simulation
+# Mocks for GitHub GraphQL API simulation.
 MOCK_USER_STATS = {
     "data": {
         "user": {
@@ -72,11 +73,26 @@ MOCK_USER_LANGUAGES = {
                         "isFork": False,
                         "languages": {
                             "edges": [
-                                {"size": 3000, "node": {"name": "Python", "color": "#3572A5"}},
-                                {"size": 1500, "node": {"name": "JavaScript", "color": "#f1e05a"}},
-                                {"size": 800, "node": {"name": "HTML", "color": "#e34c26"}},
-                                {"size": 500, "node": {"name": "CSS", "color": "#563d7c"}},
-                                {"size": 200, "node": {"name": "Shell", "color": "#89e051"}},
+                                {
+                                    "size": 3000,
+                                    "node": {"name": "Python", "color": "#3572A5"},
+                                },
+                                {
+                                    "size": 1500,
+                                    "node": {"name": "JavaScript", "color": "#f1e05a"},
+                                },
+                                {
+                                    "size": 800,
+                                    "node": {"name": "HTML", "color": "#e34c26"},
+                                },
+                                {
+                                    "size": 500,
+                                    "node": {"name": "CSS", "color": "#563d7c"},
+                                },
+                                {
+                                    "size": 200,
+                                    "node": {"name": "Shell", "color": "#89e051"},
+                                },
                             ]
                         },
                     }
@@ -88,13 +104,26 @@ MOCK_USER_LANGUAGES = {
 
 MOCK_USER_NOT_FOUND = {
     "data": {"user": None},
-    "errors": [{"message": "Could not resolve to a User with the login of 'nonexistentuser1234567890'."}],
+    "errors": [
+        {
+            "message": (
+                "Could not resolve to a User with the login of "
+                "'nonexistentuser1234567890'."
+            )
+        }
+    ],
 }
 
 
-def mock_github_post(url, *args, **kwargs):
+def mock_github_post(url: str, *args: object, **kwargs: object) -> httpx.Response:
+    """Simulate GitHub GraphQL responses for endpoint tests."""
     req_json = kwargs.get("json", {})
+    if not isinstance(req_json, dict):
+        return httpx.Response(400, json={"errors": [{"message": "Invalid mock request"}]})
+
     variables = req_json.get("variables", {})
+    if not isinstance(variables, dict):
+        variables = {}
     login = variables.get("login", "")
 
     if login == "nonexistentuser1234567890":
@@ -108,50 +137,51 @@ def mock_github_post(url, *args, **kwargs):
     return httpx.Response(200, json=MOCK_USER_STATS)
 
 
+def assert_user_not_found_error_card(response: httpx.Response) -> None:
+    """Verify that an unknown user is represented by an SVG error card."""
+    assert response.status_code == 200
+    assert "image/svg+xml" in response.headers["Content-Type"]
+    assert "<svg" in response.text
+    assert "User not found" in response.text
+
+
 @pytest.fixture(autouse=True)
 def setup_mock_and_clear_cache():
+    """Mock GitHub requests and clear cached values for each test."""
     cache.clear()
     with patch("httpx.AsyncClient.post", side_effect=mock_github_post):
         yield
     cache.clear()
 
 
-def test_get_user_success():
+def test_get_user_success() -> None:
     response = client.get("/api?username=octocat&theme=default")
+
     assert response.status_code == 200
     assert "image/svg+xml" in response.headers["Content-Type"]
     assert "<svg" in response.text
     assert "The Octocat" in response.text
 
 
-def test_get_user_not_found():
-    response = client.get("/api?username=nonexistentuser1234567890&theme=default")
-    assert response.status_code == 404
-    assert response.headers["Content-Type"] == "application/json"
-    assert response.json() == {"detail": "User not found"}
+def test_get_user_not_found() -> None:
+    response = client.get(
+        "/api?username=nonexistentuser1234567890&theme=default"
+    )
+
+    assert_user_not_found_error_card(response)
 
 
-def test_get_user_theme_not_found():
-    response = client.get("/api?username=octocat&theme=nonexistenttheme")
-    assert response.status_code == 200
-    assert "image/svg+xml" in response.headers["Content-Type"]
-    assert "<svg" in response.text
-
-    response = client.get("/api?username=octocat&theme=default")
-    assert response.status_code == 200
-    assert "image/svg+xml" in response.headers["Content-Type"]
-    assert "<svg" in response.text
-
-
-def test_get_user_no_username():
+def test_get_user_no_username() -> None:
     response = client.get("/api?theme=default")
+
     assert response.status_code == 422
     assert response.headers["Content-Type"] == "application/json"
     assert "username" in str(response.json()["detail"])
 
 
-def test_get_streak_success():
+def test_get_streak_success() -> None:
     response = client.get("/api/streak?username=octocat&theme=dracula")
+
     assert response.status_code == 200
     assert "image/svg+xml" in response.headers["Content-Type"]
     assert "<svg" in response.text
@@ -159,25 +189,30 @@ def test_get_streak_success():
     assert "flame-gradient" in response.text
 
 
-def test_get_streak_portuguese_locale():
+def test_get_streak_portuguese_locale() -> None:
     response = client.get("/api/streak?username=octocat&locale=pt")
+
     assert response.status_code == 200
     assert "OFENSIVA" in response.text
 
 
-def test_get_streak_not_found():
-    response = client.get("/api/streak?username=nonexistentuser1234567890")
-    assert response.status_code == 404
-    assert response.json() == {"detail": "User not found"}
+def test_get_streak_not_found() -> None:
+    response = client.get(
+        "/api/streak?username=nonexistentuser1234567890"
+    )
+
+    assert_user_not_found_error_card(response)
 
 
-def test_get_streak_no_username():
+def test_get_streak_no_username() -> None:
     response = client.get("/api/streak")
+
     assert response.status_code == 422
 
 
-def test_get_top_languages_success():
+def test_get_top_languages_success() -> None:
     response = client.get("/api/top-langs?username=octocat&theme=dracula")
+
     assert response.status_code == 200
     assert "image/svg+xml" in response.headers["Content-Type"]
     assert "<svg" in response.text
@@ -186,25 +221,30 @@ def test_get_top_languages_success():
     assert "JavaScript" in response.text
 
 
-def test_get_top_languages_hide_param():
+def test_get_top_languages_hide_param() -> None:
     response = client.get("/api/top-langs?username=octocat&hide=html,css")
+
     assert response.status_code == 200
     assert "Python" in response.text
     assert "HTML" not in response.text
 
 
-def test_get_top_languages_not_found():
-    response = client.get("/api/top-langs?username=nonexistentuser1234567890")
-    assert response.status_code == 404
-    assert response.json() == {"detail": "User not found"}
+def test_get_top_languages_not_found() -> None:
+    response = client.get(
+        "/api/top-langs?username=nonexistentuser1234567890"
+    )
+
+    assert_user_not_found_error_card(response)
 
 
-def test_get_top_languages_no_username():
+def test_get_top_languages_no_username() -> None:
     response = client.get("/api/top-langs")
+
     assert response.status_code == 422
 
 
-def test_health_check():
+def test_health_check() -> None:
     response = client.get("/health")
+
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}

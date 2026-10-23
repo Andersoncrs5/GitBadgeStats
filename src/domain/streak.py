@@ -5,8 +5,10 @@ calculating streak metrics, handling timezone dates, and formatting localized st
 """
 
 from datetime import date, datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, Any
 
+from src.common.locales import LocaleTranslations
+from src.common.locales import get_translations
 
 class StreakCalculator:
     """Calculates commit streak metrics following Duolingo-style rules:
@@ -19,11 +21,6 @@ class StreakCalculator:
     - 7-Day Tracker: Rolling 7-day window with lit mini-flames on active days.
     """
 
-    WEEKDAY_LABELS = {
-        "en": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
-        "pt": ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"],
-    }
-
     @classmethod
     def calculate(
         cls,
@@ -32,74 +29,76 @@ class StreakCalculator:
         locale: str = "en",
     ) -> dict:
         """Calculate streak statistics from daily contribution counts."""
-        today = user_date or datetime.now(timezone.utc).date()
-        day_map = {d["date"]: d["count"] for d in all_days}
+        translations: LocaleTranslations = get_translations(locale)
+
+        today: date = user_date or datetime.now(timezone.utc).date()
+        day_map: dict[Any, Any] = {day["date"]: day["count"] for day in all_days}
 
         today_str = today.strftime("%Y-%m-%d")
         today_count = day_map.get(today_str, 0)
         is_active_today = today_count > 0
 
-        yesterday = today - timedelta(days=1)
-        yesterday_str = yesterday.strftime("%Y-%m-%d")
-        yesterday_count = day_map.get(yesterday_str, 0)
+        yesterday: date = today - timedelta(days=1)
+        yesterday_str: str = yesterday.strftime("%Y-%m-%d")
+        yesterday_count: Any = day_map.get(yesterday_str, 0)
 
-        # 1. Current streak calculation
-        current_streak = 0
+        # 1. Calculate the current streak.
+        current_streak: int = 0
+
         if is_active_today:
             current_streak = 1
             check_date = yesterday
-            while True:
-                c = day_map.get(check_date.strftime("%Y-%m-%d"), 0)
-                if c > 0:
-                    current_streak += 1
-                    check_date -= timedelta(days=1)
-                else:
-                    break
-        else:
-            if yesterday_count > 0:
-                current_streak = 1
-                check_date = yesterday - timedelta(days=1)
-                while True:
-                    c = day_map.get(check_date.strftime("%Y-%m-%d"), 0)
-                    if c > 0:
-                        current_streak += 1
-                        check_date -= timedelta(days=1)
-                    else:
-                        break
-            else:
-                current_streak = 0
 
-        # 2. Historical longest streak calculation
-        longest_streak = 0
-        temp_streak = 0
-        sorted_days = sorted(all_days, key=lambda x: x["date"])
-        for d in sorted_days:
-            if d["count"] > 0:
+            while day_map.get(check_date.strftime("%Y-%m-%d"), 0) > 0:
+                current_streak += 1
+                check_date -= timedelta(days=1)
+
+        elif yesterday_count > 0:
+            current_streak = 1
+            check_date = yesterday - timedelta(days=1)
+
+            while day_map.get(check_date.strftime("%Y-%m-%d"), 0) > 0:
+                current_streak += 1
+                check_date -= timedelta(days=1)
+
+        # 2. Calculate the longest historical streak.
+        longest_streak: int = 0
+        temp_streak: int = 0
+
+        for day in sorted(all_days, key=lambda item: item["date"]):
+            if day["count"] > 0:
                 temp_streak += 1
-                if temp_streak > longest_streak:
-                    longest_streak = temp_streak
+                longest_streak = max(longest_streak, temp_streak)
             else:
                 temp_streak = 0
 
         longest_streak = max(longest_streak, current_streak)
 
-        # 3. 7-day weekly tracker
-        weekday_names = cls.WEEKDAY_LABELS.get(locale, cls.WEEKDAY_LABELS["en"])
+        # 3. Build the rolling 7-day activity tracker.
+        weekday_names = translations["weekdays"]
         weekly_days = []
-        for i in reversed(range(7)):
-            d = today - timedelta(days=i)
-            d_str = d.strftime("%Y-%m-%d")
-            cnt = day_map.get(d_str, 0)
-            weekly_days.append({
-                "date": d_str,
-                "day_name": weekday_names[d.weekday()],
-                "count": cnt,
-                "is_active": cnt > 0,
-                "is_today": (i == 0),
-            })
 
-        # 4. Contextual status message
-        message = cls._build_status_message(is_active_today, current_streak, locale)
+        for days_ago in reversed(range(7)):
+            current_date = today - timedelta(days=days_ago)
+            date_str = current_date.strftime("%Y-%m-%d")
+            count = day_map.get(date_str, 0)
+
+            weekly_days.append(
+                {
+                    "date": date_str,
+                    "day_name": weekday_names[current_date.weekday()],
+                    "count": count,
+                    "is_active": count > 0,
+                    "is_today": days_ago == 0,
+                }
+            )
+
+        # 4. Build the localized status message.
+        message = cls._build_status_message(
+            is_active_today=is_active_today,
+            current_streak=current_streak,
+            locale=locale,
+        )
 
         return {
             "current_streak": current_streak,
@@ -112,12 +111,22 @@ class StreakCalculator:
         }
 
     @classmethod
-    def _build_status_message(cls, is_active_today: bool, current_streak: int, locale: str) -> str:
+    def _build_status_message(
+        cls,
+        is_active_today: bool,
+        current_streak: int,
+        locale: str,
+    ) -> str:
+        """Build the appropriate status message for the selected locale."""
+        translations = get_translations(locale)
+
         if is_active_today:
-            return "Ofensiva mantida! Chama acesa hoje" if locale == "pt" else "Streak active! Flame is burning today"
+            return translations["status_active"]
+
         if current_streak > 0:
-            return "Chama apagada • Faça um commit hoje!" if locale == "pt" else "Flame unlit • Commit today to keep your streak!"
-        return "Chama apagada • Faça um commit para iniciar!" if locale == "pt" else "Flame unlit • Commit to start your streak!"
+            return translations["status_pending"]
+
+        return translations["status_start"]
 
 
 def calculate_streak_from_days(
@@ -126,4 +135,8 @@ def calculate_streak_from_days(
     locale: str = "en",
 ) -> dict:
     """Functional shortcut for StreakCalculator.calculate."""
-    return StreakCalculator.calculate(all_days, user_date=user_date, locale=locale)
+    return StreakCalculator.calculate(
+        all_days,
+        user_date=user_date,
+        locale=locale,
+    )

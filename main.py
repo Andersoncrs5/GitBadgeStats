@@ -1,16 +1,63 @@
+import logging
+from typing import Any
 from typing import Optional
-from fastapi import FastAPI, Response, Query
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 from dotenv import load_dotenv
+from fastapi import FastAPI, Request, Response
+from fastapi import HTTPException
+from fastapi.exception_handlers import http_exception_handler
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from src.common.themes import themes
+from src.renderers.languages_card import generate_languages_svg
+from src.renderers.stats_card import generate_svg
+from src.renderers.streak_card import generate_streak_svg
+from src.services.error_cards import build_error_card
 from src.services.github_service import (
     fetch_github_stats,
     fetch_github_streak,
     fetch_github_top_languages,
 )
-from src.renderers.stats_card import generate_svg
-from src.renderers.streak_card import generate_streak_svg
-from src.renderers.languages_card import generate_languages_svg
 
 load_dotenv()
+
+SUPPORTED_LOCALES = ("en", "pt")
+
+def _validate_theme(theme: str) -> None:
+    if theme not in themes:
+        available = ", ".join(sorted(themes))
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid theme '{theme}'. "
+                f"Available themes: {available}"
+            ),
+        )
+
+def _validate_locale(locale: str) -> None:
+    if locale not in SUPPORTED_LOCALES:
+        available = ", ".join(SUPPORTED_LOCALES)
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid locale '{locale}'. "
+                f"Supported locales: {available}"
+            ),
+        )
+
+def _validate_timezone(timezone_name: str) -> None:
+    try:
+        ZoneInfo(timezone_name)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid timezone '{timezone_name}'. "
+                "Use a valid IANA timezone, such as UTC, "
+                "America/Sao_Paulo or America/New_York."
+            ),
+        )
 
 app = FastAPI(
     title="Custom GitHub Stats & Streak",
@@ -23,6 +70,42 @@ CACHE_HEADERS = {
     "Content-Type": "image/svg+xml; charset=utf-8",
 }
 
+logger = logging.getLogger("gitbadgestats")
+
+# Endpoints consumed by <img> tags. Errors on these are returned as SVG cards.
+BADGE_PATHS = frozenset({
+    "/api",
+    "/api/stats",
+    "/api/streak",
+    "/api/ofensiva",
+    "/api/top-langs",
+    "/api/languages",
+})
+
+
+@app.exception_handler(StarletteHTTPException)
+async def render_badge_error_as_svg(request: Request, exc: StarletteHTTPException):
+    """Return failed badge requests as an SVG card instead of a JSON error.
+
+    Badges are embedded with <img>, where a JSON body is just a broken image. The card is sent
+    with HTTP 200 on purpose: GitHub serves README images through its Camo proxy, which answers
+    404 for any upstream status other than 200/30x, so an error status would still show a broken
+    image. The cache lifetime is short so the card disappears once the problem is fixed.
+    Anything that is not a badge request keeps the default JSON error response.
+    """
+    if request.method != "GET" or request.url.path not in BADGE_PATHS:
+        return await http_exception_handler(request, exc)
+
+    if exc.status_code == 401 or exc.status_code >= 500:
+        # The card stays generic on purpose; keep the real cause in the server logs.
+        logger.error("GitHub error on %s: HTTP %s - %s", request.url.path, exc.status_code, exc.detail)
+
+    card = build_error_card(exc.status_code, getattr(exc, "headers", None), request.query_params)
+    headers = {
+        "Cache-Control": f"public, max-age={card.cache_seconds}, s-maxage={card.cache_seconds}",
+        "Content-Type": "image/svg+xml; charset=utf-8",
+    }
+    return Response(content=card.svg, media_type="image/svg+xml", headers=headers)
 
 @app.get("/health")
 async def health_check():
@@ -43,9 +126,11 @@ async def get_repo_stats(
     border_color: Optional[str] = None,
 ):
     """Generate dynamic SVG badge with general user GitHub statistics and rank."""
-    stats = await fetch_github_stats(username)
+    _validate_theme(theme)
 
-    svg_content = generate_svg(
+    stats: dict[Any, Any] = await fetch_github_stats(username)
+
+    svg_content: str = generate_svg(
         stats,
         theme_name=theme,
         hide_rank=hide_rank,
@@ -80,7 +165,12 @@ async def get_streak_stats(
     - Streak resets to 0 if a full day is missed.
     - 7-day weekly tracker displaying lit flames for active days.
     """
-    streak_data = await fetch_github_streak(username, timezone_name=timezone, locale=locale)
+
+    _validate_theme(theme)
+    _validate_locale(locale)
+    _validate_timezone(timezone)
+
+    streak_data: dict[Any, Any] = await fetch_github_streak(username, timezone_name=timezone, locale=locale)
 
     svg_content = generate_streak_svg(
         streak_data,
@@ -110,15 +200,17 @@ async def get_top_languages(
     border_color: Optional[str] = None,
     card_title: Optional[str] = None,
 ):
+    _validate_theme(theme)
+
     """Generate dynamic SVG badge displaying user's top 5 most used languages."""
-    langs_data = await fetch_github_top_languages(
+    langs_data: dict[Any, Any] = await fetch_github_top_languages(
         username=username,
         exclude_languages=hide,
         exclude_repos=exclude_repo,
         top_n=5,
     )
 
-    svg_content = generate_languages_svg(
+    svg_content: str = generate_languages_svg(
         langs_data,
         theme_name=theme,
         title_color_override=title_color,
